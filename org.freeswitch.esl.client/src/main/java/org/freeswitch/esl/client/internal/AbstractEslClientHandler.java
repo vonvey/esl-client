@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -40,27 +41,27 @@ import org.slf4j.LoggerFactory;
  * is common to both inbound and outbound clients. This 
  * handler expects to receive decoded {@link EslMessage} or {@link EslEvent} objects. The key 
  * responsibilities for this class are:
- * </p>
- * * To synthesise a synchronous command/response api.  All IO operations using the underlying Netty 
+ * <ul><li>
+ * To synthesise a synchronous command/response api.  All IO operations using the underlying Netty 
  * library are intrinsically asynchronous which provides for excellent response and scalability.  This 
  * class provides for a blocking wait mechanism for responses to commands issued to the server.  A 
  * key assumption here is that the FreeSWITCH server will process synchronous requests in the order they
  * are received.
- * </p>
- * * Concrete sub classes are expected to 'terminate' the Netty IO processing pipeline (ie be the 'last'
+ * </li><li>
+ * Concrete sub classes are expected to 'terminate' the Netty IO processing pipeline (ie be the 'last'
  * handler). 
- * </p>
+ * </li></ul>
  * Note: implementation requirement is that an {@link ExecutionHandler} is placed in the processing 
  * pipeline prior to this handler. This will ensure that each incoming message is processed in its
  * own thread (although still guaranteed to be processed in the order of receipt).
  * 
  * @author  david varnes
- * @version $Id$
  */
 public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHandler
 {
     public static final String MESSAGE_TERMINATOR = "\n\n";  
     public static final String LINE_TERMINATOR = "\n";  
+    public static final long SYNC_CALLBACK_TIMEOUT = 3L;
 
     protected final Logger log = LoggerFactory.getLogger( this.getClass() );
 
@@ -115,8 +116,18 @@ public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHand
             syncLock.unlock();
         }
         
-        //  Block until the response is available 
-        return callback.get();
+        EslMessage message = new EslMessage();
+        try 
+        {
+            //  Block until the response is available or timeout
+        	message = callback.get();
+        } 
+        catch (RuntimeException e) 
+        {
+        	syncCallbacks.remove(callback);
+        	throw new RuntimeException( e );
+        }
+        return message;
     }
 
     /**
@@ -151,8 +162,18 @@ public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHand
             syncLock.unlock();
         }
         
-        //  Block until the response is available 
-        return callback.get();
+        EslMessage message = new EslMessage();
+        try 
+        {
+            //  Block until the response is available or timeout
+        	message = callback.get();
+        } 
+        catch (RuntimeException e) 
+        {
+        	syncCallbacks.remove(callback);
+        	throw new RuntimeException( e );
+        }
+        return message;
     }
 
     /**
@@ -232,7 +253,7 @@ public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHand
             try
             {
                 log.trace( "awaiting latch ... " );
-                latch.await();
+                latch.await(SYNC_CALLBACK_TIMEOUT, TimeUnit.SECONDS);
             }
             catch ( InterruptedException e )
             {
