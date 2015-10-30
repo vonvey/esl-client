@@ -61,7 +61,7 @@ public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHand
 {
     public static final String MESSAGE_TERMINATOR = "\n\n";  
     public static final String LINE_TERMINATOR = "\n";  
-    public static final long SYNC_CALLBACK_TIMEOUT = 3L;
+    public static final long DEFAULT_TIMEOUT = 0L;
 
     protected final Logger log = LoggerFactory.getLogger( this.getClass() );
 
@@ -92,6 +92,19 @@ public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHand
             throw new IllegalStateException( "Unexpected message type: " + e.getMessage().getClass() );
         }
     }
+
+    /**
+     * Synthesise a synchronous command/response by creating a callback object which is placed in
+     * queue and blocks waiting for another IO thread to process an incoming {@link EslMessage} and
+     * attach it to the callback.
+     *
+     * @param channel
+     * @param command single string to send
+     * @return the {@link EslMessage} attached to this command's callback
+     */
+    public EslMessage sendSyncSingleLineCommand( Channel channel, final String command){
+        return sendSyncSingleLineCommand(channel, command, DEFAULT_TIMEOUT);
+    }
     
     /**
      * Synthesise a synchronous command/response by creating a callback object which is placed in 
@@ -100,9 +113,10 @@ public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHand
      * 
      * @param channel
      * @param command single string to send
+     * @param timeout millisecond to wait
      * @return the {@link EslMessage} attached to this command's callback
      */
-    public EslMessage sendSyncSingleLineCommand( Channel channel, final String command )
+    public EslMessage sendSyncSingleLineCommand( Channel channel, final String command, long timeout)
     {
         SyncCallback callback = new SyncCallback();
         syncLock.lock();
@@ -120,7 +134,7 @@ public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHand
         try 
         {
             //  Block until the response is available or timeout
-        	message = callback.get();
+        	message = callback.get(timeout);
         } 
         catch (RuntimeException e) 
         {
@@ -131,15 +145,30 @@ public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHand
     }
 
     /**
+     * Synthesise a synchronous command/response by creating a callback object which is placed in
+     * queue and blocks waiting for another IO thread to process an incoming {@link EslMessage} and
+     * attach it to the callback.
+     *
+     * @param channel
+     * @param commandLines List of command lines to send
+     * @return the {@link EslMessage} attached to this command's callback
+     */
+    public EslMessage sendSyncMultiLineCommand( Channel channel, final List<String> commandLines)
+    {
+        return sendSyncMultiLineCommand(channel, commandLines, DEFAULT_TIMEOUT);
+    }
+
+    /**
      * Synthesise a synchronous command/response by creating a callback object which is placed in 
      * queue and blocks waiting for another IO thread to process an incoming {@link EslMessage} and
      * attach it to the callback.
      * 
      * @param channel
-     * @param command List of command lines to send
+     * @param commandLines List of command lines to send
+     * @param timeout
      * @return the {@link EslMessage} attached to this command's callback
      */
-    public EslMessage sendSyncMultiLineCommand( Channel channel, final List<String> commandLines )
+    public EslMessage sendSyncMultiLineCommand( Channel channel, final List<String> commandLines, long timeout)
     {
         SyncCallback callback = new SyncCallback();
         //  Build command with double line terminator at the end
@@ -166,7 +195,7 @@ public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHand
         try 
         {
             //  Block until the response is available or timeout
-        	message = callback.get();
+        	message = callback.get(timeout);
         } 
         catch (RuntimeException e) 
         {
@@ -185,11 +214,23 @@ public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHand
      */
     public String sendAsyncCommand( Channel channel, final String command )
     {
+        return sendAsyncCommand(channel, command, DEFAULT_TIMEOUT);
+    }
+    /**
+     * Returns the Job UUID of that the response event will have.
+     *
+     * @param channel
+     * @param command
+     * @param timeout
+     * @return Job-UUID as a string
+     */
+    public String sendAsyncCommand( Channel channel, final String command, long timeout)
+    {
         /*
-         * Send synchronously to get the Job-UUID to return, the results of the actual 
+         * Send synchronously to get the Job-UUID to return, the results of the actual
          * job request will be returned by the server as an async event.
          */
-        EslMessage response = sendSyncSingleLineCommand( channel, command );
+        EslMessage response = sendSyncSingleLineCommand( channel, command, timeout);
         if ( response.hasHeader( Name.JOB_UUID ) )
         {
             return response.getHeaderValue( Name.JOB_UUID );
@@ -199,7 +240,7 @@ public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHand
             throw new IllegalStateException( "Missing Job-UUID header in bgapi response" );
         }
     }
-    
+
     protected void handleEslMessage( ChannelHandlerContext ctx, EslMessage message )
     {
         log.info( "Received message: [{}]", message );
@@ -248,12 +289,17 @@ public abstract class AbstractEslClientHandler extends SimpleChannelUpstreamHand
          * associated response object.
          * @return
          */
-        EslMessage get()
+        EslMessage get(long timeout)
         {
             try
             {
                 log.trace( "awaiting latch ... " );
-                latch.await(SYNC_CALLBACK_TIMEOUT, TimeUnit.SECONDS);
+                //  Block until the response is available or timeout
+                if (timeout <= DEFAULT_TIMEOUT) {
+                    latch.await();
+                } else {
+                    latch.await(timeout, TimeUnit.MILLISECONDS);
+                }
             }
             catch ( InterruptedException e )
             {

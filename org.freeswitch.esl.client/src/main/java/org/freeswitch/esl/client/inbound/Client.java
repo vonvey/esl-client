@@ -218,6 +218,67 @@ public class Client
         
         return handler.sendAsyncCommand( channel, sb.toString() );
     }
+
+    /**
+     * Sends a FreeSWITCH API command to the server and blocks, waiting for an immediate response from the
+     * server.
+     * <p/>
+     * The outcome of the command from the server is retured in an {@link EslMessage} object.
+     *
+     * @param command API command to send
+     * @param arg command arguments
+     * @param timeout millisecond to wait
+     * @return an {@link EslMessage} containing command results
+     */
+    public EslMessage sendSyncApiCommand( String command, String arg, long timeout)
+    {
+        checkConnected();
+        InboundClientHandler handler = (InboundClientHandler)channel.getPipeline().getLast();
+        StringBuilder sb = new StringBuilder();
+        if ( command != null && !command.isEmpty() )
+        {
+            sb.append( "api " );
+            sb.append( command );
+        }
+        if ( arg != null && !arg.isEmpty() )
+        {
+            sb.append( ' ' );
+            sb.append( arg );
+        }
+
+        return handler.sendSyncSingleLineCommand( channel, sb.toString(), timeout);
+    }
+
+    /**
+     * Submit a FreeSWITCH API command to the server to be executed in background mode. A synchronous
+     * response from the server provides a UUID to identify the job execution results. When the server
+     * has completed the job execution it fires a BACKGROUND_JOB Event with the execution results.<p/>
+     * Note that this Client must be subscribed in the normal way to BACKGOUND_JOB Events, in order to
+     * receive this event.
+     *
+     * @param command API command to send
+     * @param arg command arguments
+     * @param timeout millisecond to wait
+     * @return String Job-UUID that the server will tag result event with.
+     */
+    public String sendAsyncApiCommand( String command, String arg , long timeout)
+    {
+        checkConnected();
+        InboundClientHandler handler = (InboundClientHandler)channel.getPipeline().getLast();
+        StringBuilder sb = new StringBuilder();
+        if ( command != null && !command.isEmpty() )
+        {
+            sb.append( "bgapi " );
+            sb.append( command );
+        }
+        if ( arg != null && !arg.isEmpty() )
+        {
+            sb.append( ' ' );
+            sb.append( arg );
+        }
+
+        return handler.sendAsyncCommand( channel, sb.toString(), timeout);
+    }
     
     /**
      * Set the current event subscription for this connection to the server.  Examples of the events 
@@ -318,7 +379,7 @@ public class Client
     
     /**
      * Delete an event filter from the current set of event filters on this connection.  See  
-     * {@link Client.addEventFilter}   
+     * {@link Client#addEventFilter}
      * 
      * @param eventHeader   to remove
      * @param valueToFilter to remove
